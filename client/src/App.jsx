@@ -1,122 +1,180 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
+import FilterBar from "./components/FilterBar";
+import TodoItem from "./components/TodoItem";
+import TodoForm from "./components/TodoForm";
 
-function App() {
-  const [count, setCount] = useState(0)
+import {
+  getTodos,
+  createTodo,
+  updateTodo,
+  deleteTodo,
+  toggleTodo,
+} from "./api/api";
+
+export default function App() {
+  const [todos, setTodos] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [lastDeleted, setLastDeleted] = useState(null);
+
+  // LOAD TODOS
+  const fetchTodos = async () => {
+    try {
+      const res = await getTodos();
+      setTodos(res.data);
+    } catch {
+      toast.error("Failed to load tasks");
+    }
+  };
+
+  useEffect(() => {
+    fetchTodos();
+  }, []);
+
+  // CREATE TODO (Optimistic)
+  const handleCreate = async (formData) => {
+    if (!formData.title.trim()) {
+      toast.error("Title is required");
+      return;
+    }
+
+    const tempId = Date.now();
+    const tempTodo = { ...formData, _id: tempId, done: false };
+
+    setTodos((prev) => [tempTodo, ...prev]);
+
+    try {
+      const res = await createTodo(formData);
+
+      setTodos((prev) =>
+        prev.map((t) =>
+          t._id === tempId ? res.data : t
+        )
+      );
+
+      toast.success("Task added");
+    } catch {
+      toast.error("Save failed");
+      fetchTodos();
+    }
+  };
+
+  // TOGGLE
+  const handleToggle = async (id) => {
+    setTodos((prev) =>
+      prev.map((t) =>
+        t._id === id ? { ...t, done: !t.done } : t
+      )
+    );
+
+    try {
+      await toggleTodo(id);
+    } catch {
+      toast.error("Update failed");
+      fetchTodos();
+    }
+  };
+
+  // DELETE + UNDO
+  const handleDelete = async (id) => {
+    const item = todos.find((t) => t._id === id);
+
+    setLastDeleted(item);
+    setTodos((prev) => prev.filter((t) => t._id !== id));
+
+    toast.info("Task deleted (click to undo)", {
+      onClick: () => undoDelete(item),
+    });
+
+    try {
+      await deleteTodo(id);
+    } catch {
+      setTodos((prev) => [item, ...prev]);
+      toast.error("Delete failed");
+    }
+  };
+
+  const undoDelete = (item) => {
+    if (!item) return;
+    setTodos((prev) => [item, ...prev]);
+    setLastDeleted(null);
+    toast.success("Restored");
+  };
+
+  // EDIT
+  const handleEdit = async (id, data) => {
+    try {
+      await updateTodo(id, data);
+      fetchTodos();
+      toast.success("Task updated");
+    } catch {
+      toast.error("Edit failed");
+    }
+  };
+
+  // FILTER + SEARCH
+  const filteredTodos = todos
+    .filter((t) => {
+      if (filter === "completed") return t.done;
+      if (filter === "pending") return !t.done;
+      return true;
+    })
+    .filter((t) =>
+      t.title.toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
+    <div className="min-h-screen bg-gray-50 py-12 px-4">
+      <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-xl ">
+
+        {/* HEADER */}
+        <div className="p-8 bg-gradient-to-r from-indigo-600 to-blue-500 rounded-2xl">
+          <h1 className="text-3xl font-bold text-white">
+            My TODOS
+          </h1>
+          <p className="text-blue-100 text-sm">
+            Stay organized and productive
           </p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
+        <div className="p-8">
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+          {/* FORM COMPONENT */}
+          <TodoForm onCreate={handleCreate} />
+
+          {/* SEARCH */}
+          <input
+            className="w-full mb-4 px-4 py-2 bg-gray-100 rounded-full"
+            placeholder="Search tasks..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+
+          {/* FILTER */}
+          <FilterBar filter={filter} setFilter={setFilter} />
+
+          {/* LIST */}
+          <div className="space-y-4 mt-6">
+            {filteredTodos.length === 0 ? (
+              <p className="text-center text-gray-400">
+                No tasks found
+              </p>
+            ) : (
+              filteredTodos.map((todo) => (
+                <TodoItem
+                  key={todo._id}
+                  todo={todo}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onEdit={handleEdit}
+                />
+              ))
+            )}
+          </div>
+
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      </div>
+    </div>
+  );
 }
-
-export default App
